@@ -2,9 +2,29 @@
   "name": "moon-phase",
   "author": "stubu",
   "version": "1.0.0",
+  "description": "Pebble Time 2 watchapp showing tonight's moon phase — name, illumination, and a procedurally drawn disc, computed on-watch.",
   "keywords": ["pebble-app"],
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shrunyan/pebble-moon-phase"
+  },
+  "homepage": "https://github.com/shrunyan/pebble-moon-phase",
+  "bugs": "https://github.com/shrunyan/pebble-moon-phase/issues",
   "dependencies": {},
+  "scripts": {
+    "build": "pebble build",
+    "clean": "pebble clean",
+    "rebuild": "pebble clean && pebble build",
+    "start": "pebble build && pebble install --emulator emery",
+    "install:emulator": "pebble install --emulator emery",
+    "install:phone": "pebble install --phone \"${PEBBLE_PHONE:?set PEBBLE_PHONE to your phone's IP (Settings > Developer Connection)}\"",
+    "logs": "pebble logs --emulator emery",
+    "screenshot": "mkdir -p screenshots && pebble screenshot --emulator emery screenshots/emery.png",
+    "kill": "pebble kill",
+    "art": "python3 store/marketing/build_art.py",
+    "deploy": "pebble build && pebble publish --name \"Moon Phase\" --version \"$npm_package_version\" --description \"$(cat store/listing-description.txt)\" --category daily --source \"https://github.com/shrunyan/pebble-moon-phase\" --icon-small store/icon-small.png --icon-large store/icon-large.png --screenshots store/emery_screenshot_1.png store/emery_screenshot_2.png store/emery_screenshot_3.png --release-notes \"${RELEASE_NOTES:-Initial release.}\" ${PUBLISH:+--is-published}"
+  },
   "pebble": {
     "displayName": "Moon Phase",
     "uuid": "a005a91f-e252-425e-a8d3-a1c032615991",

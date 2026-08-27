@@ -30,11 +30,28 @@ only ~120KB, and fetching HTTPS from it was not reliable enough to ship.
 
 ## Building & running
 
+Common workflows are wired up as `package.json` scripts:
+
 ```sh
-pebble build                          # build for all targetPlatforms
-pebble install --emulator emery       # install on the emery emulator
-pebble install --phone <ip>           # install to a paired phone
+npm run build            # pebble build
+npm run rebuild          # pebble clean && pebble build
+npm start                # build, then install on the emery emulator
+npm run install:emulator # install on the emery emulator
+npm run logs             # tail emulator logs
+npm run screenshot       # capture the emulator screen -> screenshots/emery.png
+npm run kill             # stop running emulators
+
+PEBBLE_PHONE=<ip> npm run install:phone   # install to a paired phone
+
+npm run art              # regenerate store/marketing/ composites
+npm run deploy           # build + pebble publish (see store/README.md)
 ```
+
+`npm run deploy` uploads the release without making it public. Add
+`PUBLISH=1` to publish it live, and `RELEASE_NOTES="…"` to set the notes
+(defaults to "Initial release."). The version comes from `package.json`.
+Or run the raw commands directly — `pebble build`, `pebble install
+--emulator emery`, `pebble install --phone <ip>`.
 
 ## Target platforms
 

@@ -19,7 +19,7 @@ repo can't do that part.
 | Screenshots (≥1, ≤5, unframed) | ✅ | `emery_screenshot_{1,2,3}.png`, native 200×228, filename starts with the platform name |
 | Marketing banner (720×320) | ✅ | `marketing/marketing-banner-720x320.png` — dev-portal upload only, not a CLI flag |
 | Category | ✅ | `daily` |
-| Description (≤1600 chars) | ✅ | see below (`listing-description.txt` is ~700) |
+| Description (≤1600 chars) | ✅ | `listing-description.txt` (~1100 chars) |
 | Source URL | ✅ | `https://github.com/shrunyan/pebble-moon-phase` |
 | Website URL | ⚠️ | optional Basic-Info field; point it at the repo or a personal page in the dev portal |
 | Support email | ⚠️ | defaults to your developer-account email if you don't set one |
@@ -56,34 +56,43 @@ per the guide. All three screenshots were captured from the emery emulator;
 - **Full description:** see `listing-description.txt`
 - **Release notes (1.0.0):** Initial release.
 
-## Example publish command
+## Publishing
+
+The full command is wired up as `npm run deploy` (from `package.json`):
 
 ```sh
-pebble login
-pebble build
+pebble login                      # once, first time only
 
-pebble publish \
-  --non-interactive \
+npm run deploy                    # build + upload the release (not public)
+PUBLISH=1 npm run deploy          # ...and make it public
+RELEASE_NOTES="…" npm run deploy  # set release notes (default: "Initial release.")
+```
+
+`npm run deploy` expands to:
+
+```sh
+pebble build && pebble publish \
   --name "Moon Phase" \
-  --version "1.0.0" \
+  --version "$npm_package_version" \       # from package.json
   --description "$(cat store/listing-description.txt)" \
   --category daily \
   --source "https://github.com/shrunyan/pebble-moon-phase" \
   --icon-small store/icon-small.png \
   --icon-large store/icon-large.png \
   --screenshots store/emery_screenshot_1.png store/emery_screenshot_2.png store/emery_screenshot_3.png \
-  --release-notes "Initial release." \
-  --is-published
+  --release-notes "${RELEASE_NOTES:-Initial release.}" \
+  ${PUBLISH:+--is-published}
 ```
 
 Notes:
 
+- Bump `version` in `package.json` before each release — it must strictly
+  increase over every published release.
 - Passing local `--screenshots` skips the emulator GIF capture that
   `pebble publish` does by default (`--gif-all-platforms` is on otherwise).
-- Drop `--is-published` to upload the release without making it public yet.
-- Drop `--non-interactive` for the very first publish, so the CLI can walk
-  you through creating the developer account and confirm the live category
-  list.
+- For the **very first** publish, run the raw `pebble publish` without
+  `--non-interactive` so the CLI can walk you through creating the
+  developer account and confirm the live category list.
 - The **marketing banner is not a CLI flag** — upload
   `marketing/marketing-banner-720x320.png` from the dev portal listing page.
 
