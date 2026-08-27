@@ -1,12 +1,17 @@
 // Moon Phase — shows tonight's moon phase, drawn procedurally (no image
-// assets). Computed locally (Jean Meeus, Astronomical Algorithms ch. 49) —
-// typically accurate to within a couple of minutes on primary phase timing,
-// which is far tighter than this app's display resolution. There is no
-// network call: an earlier version also confirmed/upgraded this against the
-// USNO Moon Phase API in the background, but that fetch reliably crashed
-// the watch with an out-of-memory abort (reproduced on both the QEMU
+// assets). Computed locally (Jean Meeus, Astronomical Algorithms 2nd ed.,
+// ch. 49; the Quarters use the full 25-term correction series) — typically
+// accurate to within a couple of minutes on primary phase timing, which is
+// far tighter than this app's display resolution. The phase is recomputed
+// every time the app is opened, and again whenever the select button is
+// pressed.
+//
+// There is no network call: an earlier version also confirmed/upgraded this
+// against the USNO Moon Phase API in the background, but that fetch reliably
+// crashed the watch with an out-of-memory abort (reproduced on both the QEMU
 // emulator and physical hardware, across several memory-optimization
 // attempts), so it was removed rather than keep shipping a crashing app.
+// This app targets the Pebble Time 2 (emery) — a rectangular display — only.
 
 import Poco from "commodetto/Poco";
 import Button from "pebble/button";
@@ -26,7 +31,7 @@ const dimColor    = render.makeColor(150, 155, 180);
 const infoFont = new render.Font("Gothic-Regular", 14);
 
 // Fixed decorative starfield, given as fractions of the screen size so it
-// scales cleanly across a resize or a different watch shape.
+// scales cleanly if the drawing surface is reported at a different size.
 const STARS = [
 	[0.08, 0.10], [0.85, 0.07], [0.65, 0.15], [0.14, 0.32], [0.92, 0.34],
 	[0.06, 0.58], [0.90, 0.62], [0.22, 0.88], [0.78, 0.90], [0.50, 0.05],
@@ -102,6 +107,8 @@ function drawCenteredText(text, font, color, y, w) {
 // bolder sizes — Gothic-Regular-14 is the smallest step that still reads
 // clearly while fitting every phase name on one line.
 function draw() {
+	if (!phaseInfo) return; // nothing computed yet; refreshPhase() draws once it is
+
 	const w = render.width, h = render.height;
 	render.begin();
 
@@ -126,7 +133,7 @@ function draw() {
 
 	drawCenteredText(`Tonight's Phase: ${phaseInfo.name}`, infoFont, textColor, row1Y, w);
 
-	const dateStr = formatDate(new Date());
+	const dateStr = formatDate(phaseInfo.date);
 	drawCenteredText(`${dateStr}, ${phaseInfo.illumination}% illuminated`, infoFont, dimColor, row2Y, w);
 
 	drawMoon(cx, cy, r, phaseInfo.fraction);
@@ -138,8 +145,7 @@ function draw() {
 
 // The app answers "what will the moon look like tonight" — so the
 // calculation is anchored to a representative evening time on today's
-// date, not the literal instant it happens to run (which matters most when
-// the daily 9 AM refresh fires).
+// date, not the literal instant it happens to run.
 function tonightAnchor() {
 	const now = new Date();
 	return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 21, 0, 0, 0);
@@ -173,14 +179,17 @@ const MEEUS_PHASE_OFFSET = { new: 0, first_quarter: 0.25, full: 0.5, last_quarte
 // comparison rather than trusting this estimate directly.
 function estimateBaseLunation(date) {
 	const decimalYear = date.getUTCFullYear() + date.getUTCMonth() / 12;
-	return Math.floor(Math.round((decimalYear - 2000.0) * 12.3685));
+	return Math.round((decimalYear - 2000.0) * 12.3685);
 }
 
 // JDE of one specific phase event: lunation is a whole-cycle offset from
 // the algorithm's epoch, phaseType selects which of the 4 primary phases
-// within that lunation. New/Full and the Quarters use different correction
-// term sets per Meeus (the Quarters need an extra "W" term to account for
-// the non-symmetric geometry of a half-lit disc).
+// within that lunation. Meeus, Astronomical Algorithms (2nd ed.), ch. 49 /
+// Table 49.A. New/Full use their own 14-term periodic series; the Quarters
+// use the full 25-term series plus the extra "W" term for the asymmetric
+// geometry of a half-lit disc. Written as flat expressions (no term tables)
+// to keep module-load allocation near zero — this device's JS heap is only
+// ~120KB and static arrays here overflow it on launch.
 function meeusPhaseJde(lunation, phaseType) {
 	const k = lunation + MEEUS_PHASE_OFFSET[phaseType];
 	const T = k / 1236.85;
@@ -190,11 +199,14 @@ function meeusPhaseJde(lunation, phaseType) {
 
 	const M = normalizeDegrees(2.5534 + 29.10535670 * k - 0.0000014 * T2 - 0.00000011 * T3) * DEG2RAD;
 	const Mp = normalizeDegrees(201.5643 + 385.81693528 * k + 0.0107582 * T2 + 0.00001238 * T3 - 0.000000058 * T4) * DEG2RAD;
-	const F = normalizeDegrees(160.7108 + 390.67050284 * k - 0.0016117 * T2 - 0.00001580 * T3 + 0.000000120 * T4) * DEG2RAD;
+	const F = normalizeDegrees(160.7108 + 390.67050284 * k - 0.0016118 * T2 - 0.00000227 * T3 + 0.000000011 * T4) * DEG2RAD;
 	const Omega = normalizeDegrees(124.7746 - 1.56375588 * k + 0.0020672 * T2 + 0.00000215 * T3) * DEG2RAD;
 
 	const E = 1.0 - 0.002516 * T - 0.0000074 * T2;
 	const EE = E * E;
+
+	// A1: first planetary-argument correction, applied to every phase.
+	const A1 = normalizeDegrees(299.77 + 0.107408 * k - 0.009173 * T2) * DEG2RAD;
 
 	let corrections, additional;
 	if (phaseType === "new" || phaseType === "full") {
@@ -209,20 +221,22 @@ function meeusPhaseJde(lunation, phaseType) {
 			   0.00209 * EE * Math.sin(2 * M) + -0.00111 * Math.sin(Mp - 2 * F) + -0.00057 * Math.sin(Mp + 2 * F) +
 			   0.00056 * E * Math.sin(2 * Mp + M) + -0.00042 * Math.sin(3 * Mp) + 0.00042 * E * Math.sin(M + 2 * F) +
 			   0.00038 * E * Math.sin(M - 2 * F) + -0.00024 * E * Math.sin(2 * Mp - M);
-		additional = 0.000325 * Math.sin(normalizeDegrees(299.77 + 0.107408 * k - 0.009173 * T2) * DEG2RAD) - 0.000165 * Math.sin(Omega);
+		additional = 0.000325 * Math.sin(A1) - 0.000165 * Math.sin(Omega);
 	} else {
+		// First/Last Quarter — full 25-term series from Meeus Table 49.A.
 		corrections =
 			-0.62801 * Math.sin(Mp) + 0.17172 * E * Math.sin(M) + -0.01183 * E * Math.sin(Mp + M) +
 			 0.00862 * Math.sin(2 * Mp) + 0.00804 * Math.sin(2 * F) + 0.00454 * E * Math.sin(Mp - M) +
 			 0.00204 * EE * Math.sin(2 * M) + -0.00180 * Math.sin(Mp - 2 * F) + -0.00070 * Math.sin(Mp + 2 * F) +
-			-0.00040 * Math.sin(3 * Mp) + -0.00034 * E * Math.sin(2 * Mp - M) + 0.00032 * E * Math.sin(2 * Mp + M) +
-			 0.00032 * E * Math.sin(M + 2 * F) + -0.00028 * E * Math.sin(M - 2 * F) + 0.00027 * Math.sin(Mp + 2 * M) +
-			-0.00017 * Math.sin(Omega) + -0.00005 * Math.sin(2 * Mp - 2 * F) + 0.00004 * Math.sin(2 * Mp + 2 * F) +
-			-0.00004 * Math.sin(4 * Mp) + 0.00004 * Math.sin(4 * F) + 0.00003 * E * Math.sin(Mp + 2 * M) +
-			 0.00003 * E * Math.sin(2 * Mp - 2 * M) + -0.00002 * E * Math.sin(2 * M + 2 * F) + -0.00002 * E * Math.sin(2 * M - 2 * F);
-		let W = 0.00306 - 0.00038 * E * Math.cos(M) + 0.00026 * Math.cos(Mp) - 0.00002 * Math.cos(Mp - M) + 0.00002 * Math.cos(Mp + M) + -0.00002 * Math.cos(2 * F);
+			-0.00040 * Math.sin(3 * Mp) + -0.00034 * E * Math.sin(2 * Mp - M) + 0.00032 * E * Math.sin(M + 2 * F) +
+			 0.00032 * E * Math.sin(M - 2 * F) + -0.00028 * EE * Math.sin(Mp + 2 * M) + 0.00027 * E * Math.sin(2 * Mp + M) +
+			-0.00017 * Math.sin(Omega) + -0.00005 * Math.sin(Mp - M - 2 * F) + 0.00004 * Math.sin(2 * Mp + 2 * F) +
+			-0.00004 * Math.sin(Mp + M + 2 * F) + 0.00004 * Math.sin(Mp - 2 * M) + 0.00003 * Math.sin(Mp + M - 2 * F) +
+			 0.00003 * Math.sin(3 * M) + 0.00002 * Math.sin(2 * Mp - 2 * F) + 0.00002 * Math.sin(Mp - M + 2 * F) +
+			-0.00002 * Math.sin(3 * Mp + M);
+		let W = 0.00306 - 0.00038 * E * Math.cos(M) + 0.00026 * Math.cos(Mp) - 0.00002 * Math.cos(Mp - M) + 0.00002 * Math.cos(Mp + M) + 0.00002 * Math.cos(2 * F);
 		if (phaseType === "last_quarter") W = -W;
-		additional = W + 0.000325 * Math.sin(normalizeDegrees(299.77 + 0.107408 * k - 0.009173 * T2) * DEG2RAD);
+		additional = W + 0.000325 * Math.sin(A1);
 	}
 
 	return jde + corrections + additional;
@@ -262,45 +276,33 @@ function meeusPhaseFraction(date) {
 	return ((fraction % 1) + 1) % 1;
 }
 
-function buildPhaseInfo(fraction) {
+function buildPhaseInfo(fraction, anchor) {
 	return {
 		fraction,
 		illumination: Math.round(((1 - Math.cos(2 * Math.PI * fraction)) / 2) * 100),
 		name: phaseNameFor(fraction),
+		date: anchor, // the evening the fraction was computed for; shown in the date row
 	};
 }
 
 function refreshPhase() {
-	phaseInfo = buildPhaseInfo(meeusPhaseFraction(tonightAnchor()));
+	const anchor = tonightAnchor();
+	phaseInfo = buildPhaseInfo(meeusPhaseFraction(anchor), anchor);
+	console.log(`Moon Phase: ${phaseInfo.name}, ${phaseInfo.illumination}% (fraction ${phaseInfo.fraction.toFixed(4)})`);
 	draw();
 }
 
+// Compute once now (the app was just opened) and again on every select press.
+refreshPhase();
+
 watch.addEventListener("resize", draw);
 
-new Button({
+// Kept in a module-level binding so the instance (and its native handler
+// registration) isn't collected for the life of the app.
+const selectButton = new Button({
 	types: ["select"],
-	onPush(down, type) {
-		if (down && type === "select") refreshPhase();
+	onPush(down) {
+		if (down) refreshPhase();
 	},
 });
-
-// Refresh once every morning at 9 AM local time, so the phase is already
-// re-anchored to that evening before the user glances at the watch.
-// Recomputed on each firing (rather than a single 24h setInterval) so it
-// can't drift and stays correct across the app being backgrounded/resumed.
-function msUntilNext9am() {
-	const now = new Date();
-	const next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9, 0, 0, 0);
-	if (next.getTime() <= now.getTime()) next.setDate(next.getDate() + 1);
-	return next.getTime() - now.getTime();
-}
-
-function scheduleNextRefresh() {
-	setTimeout(() => {
-		refreshPhase();
-		scheduleNextRefresh();
-	}, msUntilNext9am());
-}
-
-refreshPhase();
-scheduleNextRefresh();
+void selectButton;

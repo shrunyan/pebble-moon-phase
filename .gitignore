@@ -1,4 +1,5 @@
 node_modules/
 build/
+screenshots/
 .lock-waf_linux_build
 *.pbw

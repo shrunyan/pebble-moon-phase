@@ -6,13 +6,17 @@ rendered procedurally (no image assets) whose lit/dark terminator is drawn
 to match the real phase.
 
 The phase is computed entirely on the watch (Jean Meeus, *Astronomical
-Algorithms* ch. 49 — the same 4 primary phase-event formulas, including the
-Quarters' 24-term correction series) — typically accurate to within a
-couple of minutes on phase timing, which is far tighter than this app's
-display resolution. It's anchored to 9 PM local time so it reflects that
-evening's phase specifically, refreshes automatically every morning at 9
-AM local, and you can press the middle (select) button to recompute on
-demand.
+Algorithms* 2nd ed., ch. 49 / Table 49.A). The New/Full events use the
+leading periodic terms; the Quarters use the full 25-term correction
+series plus the *W* term — phase timing is typically accurate to within a
+couple of minutes, far tighter than this app's display resolution. The
+value is anchored to 9 PM local time so it reflects that evening's phase
+specifically. It is recomputed every time you open the app, and you can
+press the middle (select) button to recompute on demand.
+
+The correction series are written as flat arithmetic rather than
+coefficient arrays on purpose: this device gives the watch-side JavaScript
+only ~120 KB of heap, and the array form overflowed it at module load.
 
 There is no network call. An earlier version also confirmed/upgraded the
 local value against the USNO Moon Phase API in the background, but that
@@ -34,8 +38,8 @@ pebble install --phone <ip>           # install to a paired phone
 
 ## Target platforms
 
-Alloy targets the modern Pebble hardware: **emery** (Pebble Time 2) and
-**gabbro** (Pebble Round 2). Other platforms are currently not supported.
+**emery** (Pebble Time 2) only. The layout assumes a rectangular display,
+so the round platform (gabbro) is not built or supported.
 
 ## Project layout
 
