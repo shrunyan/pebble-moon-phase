@@ -1,0 +1,21 @@
+Moon Phase shows you tonight's moon at a glance.
+
+Open it and you get the current phase name (New, Waxing Crescent, First
+Quarter, and so on), the percentage of the disc that's lit, and a moon
+drawn right on the watch — its light and shadow shaped to match the real
+terminator for that phase. No image assets: the disc is rendered from the
+maths, so it's always exactly right and always crisp.
+
+The phase is computed entirely on the watch using Jean Meeus's astronomical
+algorithm (Astronomical Algorithms, 2nd edition, chapter 49), with the full
+25-term correction series for the quarter phases. Timing of the primary
+phases is typically accurate to within a couple of minutes — far tighter
+than anything the display needs. The value is anchored to 9 PM local time,
+so it reflects that evening's sky specifically rather than the moment you
+happen to glance at it.
+
+There is no network connection and no phone companion. The moon phase is
+recalculated every time you open the app, and the middle (select) button
+recomputes it on demand. Nothing leaves the watch.
+
+Built for the Pebble Time 2.

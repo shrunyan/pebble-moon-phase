@@ -1,45 +1,91 @@
-# App Store assets
+# App Store assets & submission
 
-Prepared for `pebble publish` (requires `pebble login` first, with your own
-rePebble developer account — not something this repo can do for you).
+Everything needed to publish **Moon Phase** to the Rebble appstore, following
+<https://developer.rebble.io/guides/appstore-publishing/preparing-a-submission/>.
+Publishing requires your own Rebble developer account (`pebble login`) — the
+repo can't do that part.
 
-- `icon-small.png` — 80×80, used as `--icon-small`
-- `icon-large.png` — 144×144, used as `--icon-large`
-- `emery_screenshot_1.png` — sample screenshot, used as `--screenshots`
-  (filename must start with the platform name; `pebble publish` can also
-  auto-capture screenshots from the emulator instead if you'd rather skip
-  this file — see the emulator note below)
+## Readiness checklist
 
-## Suggested listing details
+| Item | Status | Notes |
+|---|---|---|
+| Valid `.pbw` | ✅ | `pebble build` → `build/pebble-moon-phase.pbw` (emery only) |
+| Unique UUID | ✅ | `a005a91f-e252-425e-a8d3-a1c032615991` (in `package.json`; never published before) |
+| Version | ✅ | `1.0.0` — must strictly increase on every later release |
+| Watchapp, not watchface | ✅ | `pebble.watchapp.watchface = false` |
+| App launcher icon | ✅ | `resources/images/icon.png` — 25×25, **white on transparent** (verified in the emery launcher) |
+| Store icon — small | ✅ | `icon-small.png`, 80×80 PNG (`pebble publish` prompts "iconSmall (80x80)") |
+| Store icon — large | ✅ | `icon-large.png`, 144×144 PNG |
+| Screenshots (≥1, ≤5, unframed) | ✅ | `emery_screenshot_{1,2,3}.png`, native 200×228, filename starts with the platform name |
+| Marketing banner (720×320) | ✅ | `marketing/marketing-banner-720x320.png` — dev-portal upload only, not a CLI flag |
+| Category | ✅ | `daily` |
+| Description (≤1600 chars) | ✅ | see below (`listing-description.txt` is ~700) |
+| Source URL | ✅ | `https://github.com/shrunyan/pebble-moon-phase` |
+| Website URL | ⚠️ | optional Basic-Info field; point it at the repo or a personal page in the dev portal |
+| Support email | ⚠️ | defaults to your developer-account email if you don't set one |
+| Companion app | n/a | none — fully on-watch, no phone/network |
+| Timeline | n/a | no pins |
+
+## Files
+
+| File | Size | Purpose |
+|---|---|---|
+| `icon-small.png` | 80×80 | `--icon-small` |
+| `icon-large.png` | 144×144 | `--icon-large` |
+| `emery_screenshot_1.png` | 200×228 | First Quarter — `--screenshots` |
+| `emery_screenshot_2.png` | 200×228 | Waxing Crescent |
+| `emery_screenshot_3.png` | 200×228 | Waxing Gibbous |
+| `marketing/marketing-banner-720x320.png` | 720×320 | marketing banner (upload in the dev portal) |
+| `marketing/hero_1600x1000.png` | 1600×1000 | oversized composite — README / social, not a store slot |
+| `marketing/square_1200x1200.png` | 1200×1200 | square tile — social |
+| `marketing/banner_1400x560.png` | 1400×560 | wide banner — README / social |
+| `marketing/build_art.py` | — | regenerates the `marketing/` composites from the screenshots |
+
+Store screenshots **must be unframed** and match the emery screen exactly
+(200×228). The framed watch mock-ups belong only in the marketing banner,
+per the guide. All three screenshots were captured from the emery emulator;
+`pebble publish` can also auto-capture from a running emulator instead.
+
+## Listing copy
 
 - **Name:** Moon Phase
-- **Category:** `daily` (glanceable daily-info app, alongside things like
-  weather — `tools`, `notifications`, `remotes`, `health`, and `games` are
-  the other valid keys)
-- **Description:** See tonight's moon phase at a glance — a procedurally
-  drawn moon disc (no image assets) with illumination percentage and phase
-  name, computed on-watch (Jean Meeus's algorithm) with no network required.
-- **Release notes (first release):** Initial release.
+- **Category:** `daily`
+- **Short description / tagline:** See tonight's moon phase at a glance —
+  phase name, illumination, and a procedurally drawn disc, computed on your
+  watch with no network.
+- **Full description:** see `listing-description.txt`
+- **Release notes (1.0.0):** Initial release.
 
-## Example command
+## Example publish command
 
 ```sh
 pebble login
+pebble build
+
 pebble publish \
   --non-interactive \
-  --description "See tonight's moon phase at a glance — a procedurally drawn moon disc with illumination percentage and phase name, computed on-watch with no network required." \
+  --name "Moon Phase" \
+  --version "1.0.0" \
+  --description "$(cat store/listing-description.txt)" \
   --category daily \
+  --source "https://github.com/shrunyan/pebble-moon-phase" \
   --icon-small store/icon-small.png \
   --icon-large store/icon-large.png \
-  --screenshots store/emery_screenshot_1.png \
+  --screenshots store/emery_screenshot_1.png store/emery_screenshot_2.png store/emery_screenshot_3.png \
   --release-notes "Initial release." \
   --is-published
 ```
 
-Drop `--is-published` to upload a release without making it publicly
-visible yet, and drop `--non-interactive` to be walked through prompts
-instead (recommended for the very first publish, since the CLI will also
-offer to create your developer account and confirm the category list).
+Notes:
+
+- Passing local `--screenshots` skips the emulator GIF capture that
+  `pebble publish` does by default (`--gif-all-platforms` is on otherwise).
+- Drop `--is-published` to upload the release without making it public yet.
+- Drop `--non-interactive` for the very first publish, so the CLI can walk
+  you through creating the developer account and confirm the live category
+  list.
+- The **marketing banner is not a CLI flag** — upload
+  `marketing/marketing-banner-720x320.png` from the dev portal listing page.
 
 ## Resolved: HTTPS fetch was crashing the app (network removed)
 
@@ -54,5 +100,4 @@ showing a clean launch and proper teardown (`Still allocated 0B`) where
 every previous attempt had crashed immediately. This device's JS heap is
 only ~120KB, and fetching HTTPS from it was not reliable enough to ship,
 so the app is fully local now (no network, no `@moddable/pebbleproxy`
-dependency). No screenshot-capture caveat applies anymore since there's no
-network path left for `pebble publish`'s auto-capture to trip over.
+dependency).
