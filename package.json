@@ -4,9 +4,7 @@
   "version": "1.0.0",
   "keywords": ["pebble-app"],
   "private": true,
-  "dependencies": {
-    "@moddable/pebbleproxy": "^0.1.0"
-  },
+  "dependencies": {},
   "pebble": {
     "displayName": "Moon Phase",
     "uuid": "a005a91f-e252-425e-a8d3-a1c032615991",

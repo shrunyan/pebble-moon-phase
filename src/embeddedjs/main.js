@@ -1,7 +1,12 @@
 // Moon Phase — shows tonight's moon phase, drawn procedurally (no image
-// assets) using the US Naval Observatory's Moon Phase API for the primary
-// phase dates, interpolated to get today's exact position in the cycle.
-// https://aa.usno.navy.mil/data/api#phase
+// assets). Computed locally (Jean Meeus, Astronomical Algorithms ch. 49) —
+// typically accurate to within a couple of minutes on primary phase timing,
+// which is far tighter than this app's display resolution. There is no
+// network call: an earlier version also confirmed/upgraded this against the
+// USNO Moon Phase API in the background, but that fetch reliably crashed
+// the watch with an out-of-memory abort (reproduced on both the QEMU
+// emulator and physical hardware, across several memory-optimization
+// attempts), so it was removed rather than keep shipping a crashing app.
 
 import Poco from "commodetto/Poco";
 import Button from "pebble/button";
@@ -17,10 +22,8 @@ const moonDark    = render.makeColor(40, 44, 66);
 const moonEdge    = render.makeColor(80, 84, 110);
 const textColor   = render.makeColor(235, 235, 245);
 const dimColor    = render.makeColor(150, 155, 180);
-const noteColor   = render.makeColor(235, 150, 90);
 
-const infoFont  = new render.Font("Gothic-Regular", 14);
-const smallFont = new render.Font("Gothic-Regular", 9);
+const infoFont = new render.Font("Gothic-Regular", 14);
 
 // Fixed decorative starfield, given as fractions of the screen size so it
 // scales cleanly across a resize or a different watch shape.
@@ -37,8 +40,7 @@ const PHASE_NAMES = [
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
 	"Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-let state = "loading"; // "loading" | "ready"
-let phaseInfo = null;  // { fraction, illumination, name, fromApi }
+let phaseInfo; // { fraction, illumination, name } — set before first draw(), see bottom of file
 
 // fraction: position in the lunar cycle since the last new moon, 0..1
 // (0 = new moon, 0.25 = first quarter, 0.5 = full moon, 0.75 = last quarter).
@@ -94,12 +96,11 @@ function drawCenteredText(text, font, color, y, w) {
 	render.drawText(text, font, color, (w - textW) / 2, y);
 }
 
-// Fixed 4-row layout: phase name, then date + illumination, then the moon
-// itself, then an offline note if the data isn't live. Rows 1-2 use
-// Gothic-Regular (not -Bold) at a small size since "Tonight's Phase:
-// Waxing Crescent" is too wide for a 200px-class screen at larger/bolder
-// sizes — Gothic-Regular-14 is the smallest step that still reads clearly
-// while fitting every phase name on one line.
+// Fixed 3-row layout: phase name, then date + illumination, then the moon.
+// Rows 1-2 use Gothic-Regular (not -Bold) at a small size since "Tonight's
+// Phase: Waxing Crescent" is too wide for a 200px-class screen at larger/
+// bolder sizes — Gothic-Regular-14 is the smallest step that still reads
+// clearly while fitting every phase name on one line.
 function draw() {
 	const w = render.width, h = render.height;
 	render.begin();
@@ -109,208 +110,177 @@ function draw() {
 		render.fillRectangle(starColor, Math.round(nx * w), Math.round(ny * h), 1, 1);
 	});
 
-	// Reserve fixed space for all 4 rows up front — including row 4, whether
-	// or not it actually has text this draw — so the moon's size and
-	// position never shift between states. It's centered in whatever band
-	// is left between the two text blocks, sized to fill that band.
-	const topPad = Math.round(h * 0.04);
+	const topPad = Math.round(h * 0.08);
 	const row1Y = topPad;
-	const row2Y = row1Y + infoFont.height + 2;
-	const topBlockBottom = row2Y + infoFont.height;
+	const row2Y = row1Y + infoFont.height + 8;
+	const topBlockBottom = row2Y + infoFont.height + 14;
 
-	const bottomPad = Math.round(h * 0.04);
-	const row4Y = h - bottomPad - smallFont.height;
-	const bottomBlockTop = row4Y - 4;
+	const bottomPad = Math.round(h * 0.07);
+	const bottomBlockTop = h - bottomPad;
 
 	const cx = w / 2;
 	const cy = Math.round((topBlockBottom + bottomBlockTop) / 2);
-	const maxRByHeight = Math.floor((bottomBlockTop - topBlockBottom) / 2) - 4;
-	const maxRByWidth = Math.floor(w / 2) - 6;
+	const maxRByHeight = Math.floor((bottomBlockTop - topBlockBottom) / 2);
+	const maxRByWidth = Math.floor(w / 2) - 14;
 	const r = Math.min(maxRByHeight, maxRByWidth);
 
-	if (state === "loading") {
-		drawCenteredText("Tonight's Phase: Loading...", infoFont, textColor, row1Y, w);
-		drawMoon(cx, cy, r, 0);
-	} else {
-		drawCenteredText(`Tonight's Phase: ${phaseInfo.name}`, infoFont, textColor, row1Y, w);
+	drawCenteredText(`Tonight's Phase: ${phaseInfo.name}`, infoFont, textColor, row1Y, w);
 
-		const dateStr = formatDate(new Date());
-		drawCenteredText(`${dateStr}, ${phaseInfo.illumination}% illuminated`, infoFont, dimColor, row2Y, w);
+	const dateStr = formatDate(new Date());
+	drawCenteredText(`${dateStr}, ${phaseInfo.illumination}% illuminated`, infoFont, dimColor, row2Y, w);
 
-		drawMoon(cx, cy, r, phaseInfo.fraction);
-
-		if (!phaseInfo.fromApi)
-			drawCenteredText("offline estimate - tap to retry", smallFont, noteColor, row4Y, w);
-	}
+	drawMoon(cx, cy, r, phaseInfo.fraction);
 
 	render.end();
 }
 
-// --- Moon phase data --------------------------------------------------
+// --- Moon phase calculation (Jean Meeus, Astronomical Algorithms ch. 49) --
 
-// The app answers "what will the moon look like tonight" — so phase
-// calculations are anchored to a representative evening time on today's
-// date, not the literal instant the calculation happens to run (which
-// matters most when the daily 9 AM refresh fires).
+// The app answers "what will the moon look like tonight" — so the
+// calculation is anchored to a representative evening time on today's
+// date, not the literal instant it happens to run (which matters most when
+// the daily 9 AM refresh fires).
 function tonightAnchor() {
 	const now = new Date();
 	return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 21, 0, 0, 0);
 }
 
-const SYNODIC_MONTH_DAYS = 29.530588853;
-const KNOWN_NEW_MOON_UTC = Date.UTC(2000, 0, 6, 18, 14); // a reference new moon
+const DEG2RAD = Math.PI / 180;
 
-// Used only if the USNO API can't be reached: a plain mean-cycle estimate.
-function localPhaseFraction(nowTs) {
-	const days = (nowTs - KNOWN_NEW_MOON_UTC) / 86400000;
-	let fraction = (days / SYNODIC_MONTH_DAYS) % 1;
-	if (fraction < 0) fraction += 1;
-	return fraction;
+function normalizeDegrees(deg) {
+	let d = deg % 360;
+	if (d < 0) d += 360;
+	return d;
 }
 
-const PRIMARY_PHASE_FRACTION = {
-	"New Moon": 0,
-	"First Quarter": 0.25,
-	"Full Moon": 0.5,
-	"Last Quarter": 0.75,
-};
-
-// fetch() is relayed to the phone over Bluetooth AppMessage, and that
-// channel isn't necessarily up yet the instant the watch app launches — if
-// a request goes out before it's ready, this fetch() implementation has no
-// built-in timeout, so the promise can simply never settle. Race it against
-// a plain timer so a slow/never-ready connection degrades to the offline
-// estimate instead of leaving the app stuck on "Loading..." forever.
-const FETCH_TIMEOUT_MS = 15000;
-function withTimeout(promise, ms, message) {
-	return new Promise((resolve, reject) => {
-		const timer = setTimeout(() => reject(new Error(message)), ms);
-		promise.then(
-			value => { clearTimeout(timer); resolve(value); },
-			err => { clearTimeout(timer); reject(err); }
-		);
-	});
+function toJulianDate(date) {
+	let year = date.getUTCFullYear();
+	let month = date.getUTCMonth() + 1;
+	const day = date.getUTCDate() +
+		(date.getUTCHours() + date.getUTCMinutes() / 60 + date.getUTCSeconds() / 3600) / 24;
+	if (month <= 2) { year -= 1; month += 12; }
+	const A = Math.floor(year / 100);
+	const B = 2 - A + Math.floor(A / 4);
+	return Math.floor(365.25 * (year + 4716)) + Math.floor(30.6001 * (month + 1)) + day + B - 1524.5;
 }
 
-// Queries the USNO Moon Phase API for the primary phases (new/first
-// quarter/full/last quarter) bracketing today, then linearly interpolates
-// between them to get today's precise position in the cycle.
-// https://aa.usno.navy.mil/data/api#phase
-async function fetchPhaseFraction() {
-	const now = tonightAnchor();
-	const start = new Date(now.getTime() - 30 * 86400000);
-	const dateParam = `${start.getFullYear()}-${start.getMonth() + 1}-${start.getDate()}`;
+const MEEUS_PHASE_TYPES = ["new", "first_quarter", "full", "last_quarter"];
+const MEEUS_PHASE_OFFSET = { new: 0, first_quarter: 0.25, full: 0.5, last_quarter: 0.75 };
 
-	const url = new URL("https://aa.usno.navy.mil/api/moon/phases/date");
-	url.search = (new URLSearchParams({ date: dateParam, nump: "8" })).toString();
+// Rough lunation number nearest a date — only needs to land within about
+// half a cycle of correct, since meeusPhaseFraction() below samples a full
+// window of neighboring lunations and picks the true bracket by exact JDE
+// comparison rather than trusting this estimate directly.
+function estimateBaseLunation(date) {
+	const decimalYear = date.getUTCFullYear() + date.getUTCMonth() / 12;
+	return Math.floor(Math.round((decimalYear - 2000.0) * 12.3685));
+}
 
-	const response = await withTimeout(fetch(url), FETCH_TIMEOUT_MS, "USNO API request timed out");
-	if (!response.ok) throw new Error(`USNO API HTTP ${response.status}`);
-	// A rate-limit/error response can come back as an HTML page rather than
-	// JSON. Bail before parsing it.
-	const contentType = (response.headers && response.headers.get("content-type")) || "";
-	if (contentType.indexOf("json") === -1)
-		throw new Error("USNO API returned non-JSON response (" + contentType + ")");
-	const data = await response.json();
-	if (data.error || !Array.isArray(data.phasedata) || !data.phasedata.length)
-		throw new Error("USNO API returned no phase data");
+// JDE of one specific phase event: lunation is a whole-cycle offset from
+// the algorithm's epoch, phaseType selects which of the 4 primary phases
+// within that lunation. New/Full and the Quarters use different correction
+// term sets per Meeus (the Quarters need an extra "W" term to account for
+// the non-symmetric geometry of a half-lit disc).
+function meeusPhaseJde(lunation, phaseType) {
+	const k = lunation + MEEUS_PHASE_OFFSET[phaseType];
+	const T = k / 1236.85;
+	const T2 = T * T, T3 = T2 * T, T4 = T3 * T;
 
-	const entries = data.phasedata.map(p => {
-		const [hh, mm] = p.time.split(":").map(Number);
-		return {
-			ts: Date.UTC(p.year, p.month - 1, p.day, hh, mm),
-			fraction: PRIMARY_PHASE_FRACTION[p.phase],
-		};
-	}).sort((a, b) => a.ts - b.ts);
+	const jde = 2451550.09766 + 29.530588861 * k + 0.00015437 * T2 - 0.000000150 * T3 + 0.00000000073 * T4;
 
-	const nowTs = now.getTime();
-	let prev = null, next = null;
-	for (const entry of entries) {
-		if (entry.ts <= nowTs) prev = entry;
-		else if (!next) next = entry;
+	const M = normalizeDegrees(2.5534 + 29.10535670 * k - 0.0000014 * T2 - 0.00000011 * T3) * DEG2RAD;
+	const Mp = normalizeDegrees(201.5643 + 385.81693528 * k + 0.0107582 * T2 + 0.00001238 * T3 - 0.000000058 * T4) * DEG2RAD;
+	const F = normalizeDegrees(160.7108 + 390.67050284 * k - 0.0016117 * T2 - 0.00001580 * T3 + 0.000000120 * T4) * DEG2RAD;
+	const Omega = normalizeDegrees(124.7746 - 1.56375588 * k + 0.0020672 * T2 + 0.00000215 * T3) * DEG2RAD;
+
+	const E = 1.0 - 0.002516 * T - 0.0000074 * T2;
+	const EE = E * E;
+
+	let corrections, additional;
+	if (phaseType === "new" || phaseType === "full") {
+		corrections = phaseType === "new"
+			? -0.40720 * Math.sin(Mp) + 0.17241 * E * Math.sin(M) + 0.01608 * Math.sin(2 * Mp) +
+			   0.01039 * Math.sin(2 * F) + 0.00739 * E * Math.sin(Mp - M) + -0.00514 * E * Math.sin(Mp + M) +
+			   0.00208 * EE * Math.sin(2 * M) + -0.00111 * Math.sin(Mp - 2 * F) + -0.00057 * Math.sin(Mp + 2 * F) +
+			   0.00056 * E * Math.sin(2 * Mp + M) + -0.00042 * Math.sin(3 * Mp) + 0.00042 * E * Math.sin(M + 2 * F) +
+			   0.00038 * E * Math.sin(M - 2 * F) + -0.00024 * E * Math.sin(2 * Mp - M)
+			: -0.40614 * Math.sin(Mp) + 0.17302 * E * Math.sin(M) + 0.01614 * Math.sin(2 * Mp) +
+			   0.01043 * Math.sin(2 * F) + 0.00734 * E * Math.sin(Mp - M) + -0.00515 * E * Math.sin(Mp + M) +
+			   0.00209 * EE * Math.sin(2 * M) + -0.00111 * Math.sin(Mp - 2 * F) + -0.00057 * Math.sin(Mp + 2 * F) +
+			   0.00056 * E * Math.sin(2 * Mp + M) + -0.00042 * Math.sin(3 * Mp) + 0.00042 * E * Math.sin(M + 2 * F) +
+			   0.00038 * E * Math.sin(M - 2 * F) + -0.00024 * E * Math.sin(2 * Mp - M);
+		additional = 0.000325 * Math.sin(normalizeDegrees(299.77 + 0.107408 * k - 0.009173 * T2) * DEG2RAD) - 0.000165 * Math.sin(Omega);
+	} else {
+		corrections =
+			-0.62801 * Math.sin(Mp) + 0.17172 * E * Math.sin(M) + -0.01183 * E * Math.sin(Mp + M) +
+			 0.00862 * Math.sin(2 * Mp) + 0.00804 * Math.sin(2 * F) + 0.00454 * E * Math.sin(Mp - M) +
+			 0.00204 * EE * Math.sin(2 * M) + -0.00180 * Math.sin(Mp - 2 * F) + -0.00070 * Math.sin(Mp + 2 * F) +
+			-0.00040 * Math.sin(3 * Mp) + -0.00034 * E * Math.sin(2 * Mp - M) + 0.00032 * E * Math.sin(2 * Mp + M) +
+			 0.00032 * E * Math.sin(M + 2 * F) + -0.00028 * E * Math.sin(M - 2 * F) + 0.00027 * Math.sin(Mp + 2 * M) +
+			-0.00017 * Math.sin(Omega) + -0.00005 * Math.sin(2 * Mp - 2 * F) + 0.00004 * Math.sin(2 * Mp + 2 * F) +
+			-0.00004 * Math.sin(4 * Mp) + 0.00004 * Math.sin(4 * F) + 0.00003 * E * Math.sin(Mp + 2 * M) +
+			 0.00003 * E * Math.sin(2 * Mp - 2 * M) + -0.00002 * E * Math.sin(2 * M + 2 * F) + -0.00002 * E * Math.sin(2 * M - 2 * F);
+		let W = 0.00306 - 0.00038 * E * Math.cos(M) + 0.00026 * Math.cos(Mp) - 0.00002 * Math.cos(Mp - M) + 0.00002 * Math.cos(Mp + M) + -0.00002 * Math.cos(2 * F);
+		if (phaseType === "last_quarter") W = -W;
+		additional = W + 0.000325 * Math.sin(normalizeDegrees(299.77 + 0.107408 * k - 0.009173 * T2) * DEG2RAD);
 	}
-	if (!prev || !next) throw new Error("USNO API window did not bracket today");
 
-	let nextFraction = next.fraction;
-	if (nextFraction <= prev.fraction) nextFraction += 1; // wrapped past new moon
+	return jde + corrections + additional;
+}
 
-	const span = next.ts - prev.ts;
-	const progress = span > 0 ? (nowTs - prev.ts) / span : 0;
-	const fraction = prev.fraction + progress * (nextFraction - prev.fraction);
+// Brackets a date between its two nearest primary-phase events and linearly
+// interpolates. Samples a 3-lunation window so the true bracket is found by
+// exact JDE comparison regardless of how accurate the rough lunation
+// estimate turns out to be. Tracks only the running best prev/next
+// candidates rather than collecting all 12 samples into an array to sort —
+// this device's heap is tiny, and that array was unnecessary allocation
+// for something computed on every launch.
+function meeusPhaseFraction(date) {
+	const jdNow = toJulianDate(date);
+	const baseLunation = estimateBaseLunation(date);
+
+	let prevJde = -Infinity, prevFraction = 0;
+	let nextJde = Infinity, nextFraction = 0;
+
+	for (let dk = -1; dk <= 1; dk++) {
+		for (let i = 0; i < MEEUS_PHASE_TYPES.length; i++) {
+			const phaseType = MEEUS_PHASE_TYPES[i];
+			const jde = meeusPhaseJde(baseLunation + dk, phaseType);
+			const fraction = MEEUS_PHASE_OFFSET[phaseType] + dk;
+			if (jde <= jdNow) {
+				if (jde > prevJde) { prevJde = jde; prevFraction = fraction; }
+			} else {
+				if (jde < nextJde) { nextJde = jde; nextFraction = fraction; }
+			}
+		}
+	}
+	if (prevJde === -Infinity || nextJde === Infinity) return 0; // shouldn't happen with a 3-lunation window
+
+	const span = nextJde - prevJde;
+	const progress = span > 0 ? (jdNow - prevJde) / span : 0;
+	const fraction = prevFraction + progress * (nextFraction - prevFraction);
 	return ((fraction % 1) + 1) % 1;
 }
 
-function buildPhaseInfo(fraction, fromApi) {
+function buildPhaseInfo(fraction) {
 	return {
 		fraction,
 		illumination: Math.round(((1 - Math.cos(2 * Math.PI * fraction)) / 2) * 100),
 		name: phaseNameFor(fraction),
-		fromApi,
 	};
 }
 
-// This device's JS heap is tiny (~120KB), and a failed/unexpected response
-// can still cost real memory before it's recognized as unusable. Rather
-// than retry quickly on failure, back off hard: 2 minutes, then 4, 8, 16...
-// A successful fetch hasn't shown any problem, so only failures extend the
-// wait — the app stays just as responsive on the common path, and a user
-// mashing "tap to retry" during an outage can't make things worse.
-// Capped well under a day so a prolonged outage can never make this back
-// off further than scheduleNextRefresh()'s own once-a-day cadence — without
-// a cap, enough consecutive failures would silently swallow that daily
-// attempt too, since it also goes through this same cooldown check.
-const BASE_RETRY_BACKOFF_MS = 2 * 60 * 1000;
-const MAX_RETRY_BACKOFF_MS = 30 * 60 * 1000;
-const MIN_RELOAD_INTERVAL_MS = 15000; // floor once a fetch has succeeded
-
-let loading = false;
-let lastLoadAt = 0;
-let consecutiveFailures = 0;
-
-function reloadCooldownMs() {
-	if (consecutiveFailures === 0) return MIN_RELOAD_INTERVAL_MS;
-	return Math.min(BASE_RETRY_BACKOFF_MS * Math.pow(2, consecutiveFailures - 1), MAX_RETRY_BACKOFF_MS);
-}
-
-async function loadPhase(force) {
-	if (loading) return;
-	if (!force && Date.now() - lastLoadAt < reloadCooldownMs()) return;
-	loading = true;
-	lastLoadAt = Date.now();
-	state = "loading";
-	draw();
-
-	try {
-		const fraction = await fetchPhaseFraction();
-		phaseInfo = buildPhaseInfo(fraction, true);
-		consecutiveFailures = 0;
-	} catch (err) {
-		consecutiveFailures++;
-		const reason = String((err && err.message) || err).slice(0, 100);
-		console.log("Moon Phase: USNO fetch failed (" + reason + "), using offline estimate. consecutiveFailures=" + consecutiveFailures);
-		phaseInfo = buildPhaseInfo(localPhaseFraction(tonightAnchor().getTime()), false);
-	}
-
-	state = "ready";
-	loading = false;
+function refreshPhase() {
+	phaseInfo = buildPhaseInfo(meeusPhaseFraction(tonightAnchor()));
 	draw();
 }
 
 watch.addEventListener("resize", draw);
 
-// The initial loadPhase() call below can fire before the phone's
-// AppMessage channel is actually up (see FETCH_TIMEOUT_MS above) and time
-// out into the offline estimate. Once the connection genuinely comes up,
-// retry right away rather than waiting out any backoff from that timeout —
-// a connection state change is new information, not impatient mashing.
-watch.addEventListener("connected", () => {
-	if (watch.connected.pebblekit) loadPhase(true);
-});
-
 new Button({
 	types: ["select"],
 	onPush(down, type) {
-		if (down && type === "select") loadPhase();
+		if (down && type === "select") refreshPhase();
 	},
 });
 
@@ -327,11 +297,10 @@ function msUntilNext9am() {
 
 function scheduleNextRefresh() {
 	setTimeout(() => {
-		loadPhase();
+		refreshPhase();
 		scheduleNextRefresh();
 	}, msUntilNext9am());
 }
 
-draw();
-loadPhase();
+refreshPhase();
 scheduleNextRefresh();
