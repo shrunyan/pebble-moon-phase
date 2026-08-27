@@ -8,9 +8,21 @@ to match the real phase.
 Phase data comes from the [USNO Moon Phase
 API](https://aa.usno.navy.mil/data/api#phase): the app fetches the primary
 phases (new/first quarter/full/last quarter) bracketing today and
-interpolates between them. If the API can't be reached, it falls back to a
-local mean-cycle estimate so the app still shows something useful offline.
-Press the middle (select) button to refresh.
+interpolates between them, anchored to 9 PM local time so it reflects that
+evening's phase specifically. It refreshes automatically every morning at 9
+AM local, and you can press the middle (select) button to refresh on
+demand. If the API can't be reached, it falls back to a local mean-cycle
+estimate so the app still shows something useful offline, backing off
+(2 min, 4, 8... capped at 30 min) before it will retry again so a spell of
+failures can't be turned into a flood of retries.
+
+**Known issue:** in testing, fetching the (HTTPS) USNO API reliably
+crashed the QEMU emulator's `pypkjs` with an out-of-memory abort, while the
+same code against a plain HTTP endpoint did not — see `store/README.md`
+for the full writeup. This looks like a bug in the emulator's Python-based
+TLS handling specifically, not the app, but it has not been confirmed
+either way on physical hardware. Test on a real Pebble Time 2 + phone
+before relying on this.
 
 ## Building & running
 

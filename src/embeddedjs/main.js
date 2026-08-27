@@ -15,13 +15,10 @@ const starColor   = render.makeColor(200, 205, 230);
 const moonLit     = render.makeColor(228, 222, 196);
 const moonDark    = render.makeColor(40, 44, 66);
 const moonEdge    = render.makeColor(80, 84, 110);
-const titleColor  = render.makeColor(140, 150, 195);
 const textColor   = render.makeColor(235, 235, 245);
 const dimColor    = render.makeColor(150, 155, 180);
 const noteColor   = render.makeColor(235, 150, 90);
 
-const titleFont = new render.Font("Gothic-Bold", 14);
-const phaseFont = new render.Font("Gothic-Bold", 18);
 const infoFont  = new render.Font("Gothic-Regular", 14);
 const smallFont = new render.Font("Gothic-Regular", 9);
 
@@ -92,6 +89,17 @@ function drawMoon(cx, cy, r, fraction) {
 	}
 }
 
+function drawCenteredText(text, font, color, y, w) {
+	const textW = render.getTextWidth(text, font);
+	render.drawText(text, font, color, (w - textW) / 2, y);
+}
+
+// Fixed 4-row layout: phase name, then date + illumination, then the moon
+// itself, then an offline note if the data isn't live. Rows 1-2 use
+// Gothic-Regular (not -Bold) at a small size since "Tonight's Phase:
+// Waxing Crescent" is too wide for a 200px-class screen at larger/bolder
+// sizes — Gothic-Regular-14 is the smallest step that still reads clearly
+// while fitting every phase name on one line.
 function draw() {
 	const w = render.width, h = render.height;
 	render.begin();
@@ -101,38 +109,38 @@ function draw() {
 		render.fillRectangle(starColor, Math.round(nx * w), Math.round(ny * h), 1, 1);
 	});
 
-	const title = "TONIGHT'S MOON";
-	const titleW = render.getTextWidth(title, titleFont);
-	render.drawText(title, titleFont, titleColor, (w - titleW) / 2, Math.round(h * 0.05));
+	// Reserve fixed space for all 4 rows up front — including row 4, whether
+	// or not it actually has text this draw — so the moon's size and
+	// position never shift between states. It's centered in whatever band
+	// is left between the two text blocks, sized to fill that band.
+	const topPad = Math.round(h * 0.04);
+	const row1Y = topPad;
+	const row2Y = row1Y + infoFont.height + 2;
+	const topBlockBottom = row2Y + infoFont.height;
+
+	const bottomPad = Math.round(h * 0.04);
+	const row4Y = h - bottomPad - smallFont.height;
+	const bottomBlockTop = row4Y - 4;
 
 	const cx = w / 2;
-	const cy = Math.round(h * 0.42);
-	const r = Math.round(Math.min(w, h) * 0.24);
+	const cy = Math.round((topBlockBottom + bottomBlockTop) / 2);
+	const maxRByHeight = Math.floor((bottomBlockTop - topBlockBottom) / 2) - 4;
+	const maxRByWidth = Math.floor(w / 2) - 6;
+	const r = Math.min(maxRByHeight, maxRByWidth);
 
 	if (state === "loading") {
+		drawCenteredText("Tonight's Phase: Loading...", infoFont, textColor, row1Y, w);
 		drawMoon(cx, cy, r, 0);
-		const msg = "Loading...";
-		const mw = render.getTextWidth(msg, infoFont);
-		render.drawText(msg, infoFont, dimColor, (w - mw) / 2, cy + r + 16);
 	} else {
-		drawMoon(cx, cy, r, phaseInfo.fraction);
-
-		const nameW = render.getTextWidth(phaseInfo.name, phaseFont);
-		render.drawText(phaseInfo.name, phaseFont, textColor, (w - nameW) / 2, cy + r + 12);
-
-		const info = `${phaseInfo.illumination}% illuminated`;
-		const infoW = render.getTextWidth(info, infoFont);
-		render.drawText(info, infoFont, dimColor, (w - infoW) / 2, cy + r + 36);
+		drawCenteredText(`Tonight's Phase: ${phaseInfo.name}`, infoFont, textColor, row1Y, w);
 
 		const dateStr = formatDate(new Date());
-		const dateW = render.getTextWidth(dateStr, smallFont);
-		render.drawText(dateStr, smallFont, dimColor, (w - dateW) / 2, cy + r + 56);
+		drawCenteredText(`${dateStr}, ${phaseInfo.illumination}% illuminated`, infoFont, dimColor, row2Y, w);
 
-		if (!phaseInfo.fromApi) {
-			const note = "offline estimate - tap to retry";
-			const noteW = render.getTextWidth(note, smallFont);
-			render.drawText(note, smallFont, noteColor, (w - noteW) / 2, h - 16);
-		}
+		drawMoon(cx, cy, r, phaseInfo.fraction);
+
+		if (!phaseInfo.fromApi)
+			drawCenteredText("offline estimate - tap to retry", smallFont, noteColor, row4Y, w);
 	}
 
 	render.end();
@@ -167,6 +175,23 @@ const PRIMARY_PHASE_FRACTION = {
 	"Last Quarter": 0.75,
 };
 
+// fetch() is relayed to the phone over Bluetooth AppMessage, and that
+// channel isn't necessarily up yet the instant the watch app launches — if
+// a request goes out before it's ready, this fetch() implementation has no
+// built-in timeout, so the promise can simply never settle. Race it against
+// a plain timer so a slow/never-ready connection degrades to the offline
+// estimate instead of leaving the app stuck on "Loading..." forever.
+const FETCH_TIMEOUT_MS = 15000;
+function withTimeout(promise, ms, message) {
+	return new Promise((resolve, reject) => {
+		const timer = setTimeout(() => reject(new Error(message)), ms);
+		promise.then(
+			value => { clearTimeout(timer); resolve(value); },
+			err => { clearTimeout(timer); reject(err); }
+		);
+	});
+}
+
 // Queries the USNO Moon Phase API for the primary phases (new/first
 // quarter/full/last quarter) bracketing today, then linearly interpolates
 // between them to get today's precise position in the cycle.
@@ -179,8 +204,13 @@ async function fetchPhaseFraction() {
 	const url = new URL("https://aa.usno.navy.mil/api/moon/phases/date");
 	url.search = (new URLSearchParams({ date: dateParam, nump: "8" })).toString();
 
-	const response = await fetch(url);
+	const response = await withTimeout(fetch(url), FETCH_TIMEOUT_MS, "USNO API request timed out");
 	if (!response.ok) throw new Error(`USNO API HTTP ${response.status}`);
+	// A rate-limit/error response can come back as an HTML page rather than
+	// JSON. Bail before parsing it.
+	const contentType = (response.headers && response.headers.get("content-type")) || "";
+	if (contentType.indexOf("json") === -1)
+		throw new Error("USNO API returned non-JSON response (" + contentType + ")");
 	const data = await response.json();
 	if (data.error || !Array.isArray(data.phasedata) || !data.phasedata.length)
 		throw new Error("USNO API returned no phase data");
@@ -219,18 +249,45 @@ function buildPhaseInfo(fraction, fromApi) {
 	};
 }
 
+// This device's JS heap is tiny (~120KB), and a failed/unexpected response
+// can still cost real memory before it's recognized as unusable. Rather
+// than retry quickly on failure, back off hard: 2 minutes, then 4, 8, 16...
+// A successful fetch hasn't shown any problem, so only failures extend the
+// wait — the app stays just as responsive on the common path, and a user
+// mashing "tap to retry" during an outage can't make things worse.
+// Capped well under a day so a prolonged outage can never make this back
+// off further than scheduleNextRefresh()'s own once-a-day cadence — without
+// a cap, enough consecutive failures would silently swallow that daily
+// attempt too, since it also goes through this same cooldown check.
+const BASE_RETRY_BACKOFF_MS = 2 * 60 * 1000;
+const MAX_RETRY_BACKOFF_MS = 30 * 60 * 1000;
+const MIN_RELOAD_INTERVAL_MS = 15000; // floor once a fetch has succeeded
+
 let loading = false;
-async function loadPhase() {
+let lastLoadAt = 0;
+let consecutiveFailures = 0;
+
+function reloadCooldownMs() {
+	if (consecutiveFailures === 0) return MIN_RELOAD_INTERVAL_MS;
+	return Math.min(BASE_RETRY_BACKOFF_MS * Math.pow(2, consecutiveFailures - 1), MAX_RETRY_BACKOFF_MS);
+}
+
+async function loadPhase(force) {
 	if (loading) return;
+	if (!force && Date.now() - lastLoadAt < reloadCooldownMs()) return;
 	loading = true;
+	lastLoadAt = Date.now();
 	state = "loading";
 	draw();
 
 	try {
 		const fraction = await fetchPhaseFraction();
 		phaseInfo = buildPhaseInfo(fraction, true);
+		consecutiveFailures = 0;
 	} catch (err) {
-		console.log("Moon Phase: USNO fetch failed, using offline estimate - " + err);
+		consecutiveFailures++;
+		const reason = String((err && err.message) || err).slice(0, 100);
+		console.log("Moon Phase: USNO fetch failed (" + reason + "), using offline estimate. consecutiveFailures=" + consecutiveFailures);
 		phaseInfo = buildPhaseInfo(localPhaseFraction(tonightAnchor().getTime()), false);
 	}
 
@@ -240,6 +297,15 @@ async function loadPhase() {
 }
 
 watch.addEventListener("resize", draw);
+
+// The initial loadPhase() call below can fire before the phone's
+// AppMessage channel is actually up (see FETCH_TIMEOUT_MS above) and time
+// out into the offline estimate. Once the connection genuinely comes up,
+// retry right away rather than waiting out any backoff from that timeout —
+// a connection state change is new information, not impatient mashing.
+watch.addEventListener("connected", () => {
+	if (watch.connected.pebblekit) loadPhase(true);
+});
 
 new Button({
 	types: ["select"],
