@@ -50,7 +50,12 @@ echo "    $NEW_VERSION"
 trap 'echo >&2; echo "release failed after the version bump — undo the local commit + tag with:" >&2; echo "  git reset --hard HEAD~1 && git tag -d $NEW_VERSION" >&2' ERR
 
 echo "==> Publishing to the appstore"
+# --non-interactive so the flags are used verbatim (otherwise pebble prompts
+# for a screenshot source and reads stdin). --replace-screenshots makes the
+# listing's screenshots exactly the three in store/ on every release; the
+# description/category/icons are likewise pushed from the repo each time.
 pebble publish \
+  --non-interactive \
   --name "Moon Phase" \
   --version "${NEW_VERSION#v}" \
   --description "$(cat store/listing-description.txt)" \
@@ -59,6 +64,7 @@ pebble publish \
   --icon-small store/icon-small.png \
   --icon-large store/icon-large.png \
   --screenshots store/emery_screenshot_1.png store/emery_screenshot_2.png store/emery_screenshot_3.png \
+  --replace-screenshots \
   --release-notes "${RELEASE_NOTES:-Release ${NEW_VERSION}}" \
   ${PUBLISH:+--is-published}
 

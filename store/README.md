@@ -81,6 +81,7 @@ The publish step is:
 
 ```sh
 pebble publish \
+  --non-interactive \
   --name "Moon Phase" \
   --version "<the new version>" \
   --description "$(cat store/listing-description.txt)" \
@@ -89,6 +90,7 @@ pebble publish \
   --icon-small store/icon-small.png \
   --icon-large store/icon-large.png \
   --screenshots store/emery_screenshot_1.png store/emery_screenshot_2.png store/emery_screenshot_3.png \
+  --replace-screenshots \
   --release-notes "${RELEASE_NOTES:-Release vX.Y.Z}" \
   ${PUBLISH:+--is-published}
 ```
@@ -97,12 +99,17 @@ Notes:
 
 - Every published release must have a strictly greater version — the
   `npm version` bump guarantees this.
+- The repo is the source of truth: every release pushes the description,
+  category, icons, and the three `store/` screenshots to the listing
+  (`--replace-screenshots` sets them exactly, not append). Portal-only
+  edits to those fields are overwritten on the next release.
+- `--non-interactive` is required — otherwise `pebble publish` prompts for
+  a screenshot source and blocks on stdin.
 - Passing local `--screenshots` skips the emulator GIF capture that
   `pebble publish` does by default (`--gif-all-platforms` is on otherwise).
-- For the **very first** publish, run `pebble publish` by hand without
-  `--non-interactive` so the CLI can walk you through creating the
-  developer account and confirm the live category list. After that,
-  `npm run release` handles it.
+- 1.0.0 was published by hand (interactively, to create the app and link
+  the developer account). Every release after that goes through
+  `npm run release`.
 - The **marketing banner is not a CLI flag** — upload
   `marketing/marketing-banner-720x320.png` from the dev portal listing page.
 
