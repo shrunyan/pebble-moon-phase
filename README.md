@@ -41,7 +41,8 @@ npm run logs             # tail emulator logs
 npm run screenshot       # capture the emulator screen -> screenshots/emery.png
 npm run kill             # stop running emulators
 
-PEBBLE_PHONE=<ip> npm run install:phone   # install to a paired phone
+npm run install:phone -- <ip>            # install to a paired phone (IP from
+                                         # Settings > Developer Connection)
 
 npm run art              # regenerate store/marketing/ composites
 
