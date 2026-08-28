@@ -44,12 +44,17 @@ npm run kill             # stop running emulators
 PEBBLE_PHONE=<ip> npm run install:phone   # install to a paired phone
 
 npm run art              # regenerate store/marketing/ composites
-npm run deploy           # build + pebble publish (see store/README.md)
+
+npm run release -- fix    # bump patch, commit + tag, publish, push
+npm run release -- minor  # bump minor  ·  also: major
 ```
 
-`npm run deploy` uploads the release without making it public. Add
-`PUBLISH=1` to publish it live, and `RELEASE_NOTES="…"` to set the notes
-(defaults to "Initial release."). The version comes from `package.json`.
+`npm run release` builds, runs `npm version` (which commits + tags), then
+`pebble publish`, then `git push --follow-tags`. It uploads the release
+without making it public — add `PUBLISH=1` to publish live, and
+`RELEASE_NOTES="…"` to set the notes. Must be run from a clean `main`.
+See `store/README.md` for the appstore details.
+
 Or run the raw commands directly — `pebble build`, `pebble install
 --emulator emery`, `pebble install --phone <ip>`.
 
@@ -65,7 +70,9 @@ src/c/mdbl.c                   C glue around the Moddable runtime
 src/embeddedjs/main.js         JavaScript that runs on the watch
 src/embeddedjs/manifest.json   Moddable manifest
 src/pkjs/index.js              PebbleKit JS (phone-side) code
-package.json                   Project metadata (UUID, platforms, resources)
+package.json                   Project metadata (UUID, platforms, resources) + npm scripts
+scripts/release.sh             Version bump + publish + push (npm run release)
+store/                         Appstore icons, screenshots, marketing art, submission notes
 wscript                        Build rules — usually no need to edit
 ```
 

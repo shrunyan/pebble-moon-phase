@@ -58,41 +58,51 @@ per the guide. All three screenshots were captured from the emery emulator;
 
 ## Publishing
 
-The full command is wired up as `npm run deploy` (from `package.json`):
+Releasing is wired up as `npm run release` (`scripts/release.sh`):
 
 ```sh
-pebble login                      # once, first time only
+pebble login                        # once, first time only
 
-npm run deploy                    # build + upload the release (not public)
-PUBLISH=1 npm run deploy          # ...and make it public
-RELEASE_NOTES="…" npm run deploy  # set release notes (default: "Initial release.")
+npm run release -- fix              # 1.0.0 -> 1.0.1
+npm run release -- minor            # 1.0.0 -> 1.1.0
+npm run release -- major            # 1.0.0 -> 2.0.0
+
+PUBLISH=1 npm run release -- fix            # ...and make it public
+RELEASE_NOTES="Fixed X" npm run release -- fix
 ```
 
-`npm run deploy` expands to:
+From a clean `main`, it runs: `pebble build` → `npm version <bump>`
+(updates `package.json` + `package-lock.json`, commits `Release vX.Y.Z`,
+tags `vX.Y.Z`) → `pebble publish` → `git push --follow-tags`. Push is
+last, so a failed publish leaves only a local commit — undo it with
+`git reset --hard HEAD~1 && git tag -d vX.Y.Z`.
+
+The publish step is:
 
 ```sh
-pebble build && pebble publish \
+pebble publish \
   --name "Moon Phase" \
-  --version "$npm_package_version" \       # from package.json
+  --version "<the new version>" \
   --description "$(cat store/listing-description.txt)" \
   --category daily \
   --source "https://github.com/shrunyan/pebble-moon-phase" \
   --icon-small store/icon-small.png \
   --icon-large store/icon-large.png \
   --screenshots store/emery_screenshot_1.png store/emery_screenshot_2.png store/emery_screenshot_3.png \
-  --release-notes "${RELEASE_NOTES:-Initial release.}" \
+  --release-notes "${RELEASE_NOTES:-Release vX.Y.Z}" \
   ${PUBLISH:+--is-published}
 ```
 
 Notes:
 
-- Bump `version` in `package.json` before each release — it must strictly
-  increase over every published release.
+- Every published release must have a strictly greater version — the
+  `npm version` bump guarantees this.
 - Passing local `--screenshots` skips the emulator GIF capture that
   `pebble publish` does by default (`--gif-all-platforms` is on otherwise).
-- For the **very first** publish, run the raw `pebble publish` without
+- For the **very first** publish, run `pebble publish` by hand without
   `--non-interactive` so the CLI can walk you through creating the
-  developer account and confirm the live category list.
+  developer account and confirm the live category list. After that,
+  `npm run release` handles it.
 - The **marketing banner is not a CLI flag** — upload
   `marketing/marketing-banner-720x320.png` from the dev portal listing page.
 

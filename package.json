@@ -23,7 +23,7 @@
     "screenshot": "mkdir -p screenshots && pebble screenshot --emulator emery screenshots/emery.png",
     "kill": "pebble kill",
     "art": "python3 store/marketing/build_art.py",
-    "deploy": "pebble build && pebble publish --name \"Moon Phase\" --version \"$npm_package_version\" --description \"$(cat store/listing-description.txt)\" --category daily --source \"https://github.com/shrunyan/pebble-moon-phase\" --icon-small store/icon-small.png --icon-large store/icon-large.png --screenshots store/emery_screenshot_1.png store/emery_screenshot_2.png store/emery_screenshot_3.png --release-notes \"${RELEASE_NOTES:-Initial release.}\" ${PUBLISH:+--is-published}"
+    "release": "bash scripts/release.sh"
   },
   "pebble": {
     "displayName": "Moon Phase",
