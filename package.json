@@ -1,9 +1,11 @@
 {
   "name": "moon-phase",
   "author": "stubu",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Pebble Time 2 watchapp showing tonight's moon phase — name, illumination, and a procedurally drawn disc, computed on-watch.",
-  "keywords": ["pebble-app"],
+  "keywords": [
+    "pebble-app"
+  ],
   "private": true,
   "repository": {
     "type": "git",
@@ -37,8 +39,7 @@
     "watchapp": {
       "watchface": false
     },
-    "messageKeys": {
-    },
+    "messageKeys": {},
     "resources": {
       "media": [
         {
